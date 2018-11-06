@@ -1,0 +1,210 @@
+---
+title: "Initial Cleaning, Tables and Maps"
+author: "Maiia Bakhova"
+date: "November 6, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set
+```
+
+## Initial Investigation and Cleaning
+Let us begin with data loading.
+```{r data_load}
+setwd("~/PROJECTS/SD_WaterQuality")
+df <- read.csv("beachwatch-sd.csv", stringsAsFactors = F)
+```
+Check if we have some columns which have only NA values, and if yes remove them. 
+As you see below here were 22 of them.
+
+```{r NA_cleaning}
+no_na <- sapply(df, function(col) sum(!is.na(col))==0)
+sum(no_na)
+df <- df[!no_na]
+```
+
+In addition we have constant columns. We can remove them,
+too. As result we are left with 16 variables. We can then look
+at what kind of variables we have. 
+
+```{r const_cleaning}
+constCols <- sapply(df, function(col) length(unique(col))==1)
+sum(constCols)
+df <- df[!constCols]
+summary(df)
+```
+We still have one variable 'result' with several values.
+
+
+### Creating new variables. 
+Let us create station groups using 2 first letters of a station,
+and compute how many stations are in each group.
+```{r new_vars}
+df$stationgroup <- substr(df$stationcode, 1, 2)
+unique(df$stationgroup)
+df$stationgroup <- factor(df$stationgroup)
+# How many stations are in each station group?
+tapply(df$stationcode, df$stationgroup, 
+    FUN=function(x) length(unique(x)))
+```
+### Subgroup Counts.
+```{r station_groups}
+# How many records are for each station group?
+table(df$stationgroup)
+# How many records are for each analysis type?
+table(df$analyte)
+library(kableExtra)
+# Some more table were created as well. 
+kable(table(df[c('analyte','stationgroup')]), format='markdown')
+kable(table(df[c('analyte', 'unit')]), format='markdown',align='ccc')
+kable(table(df[c('methodname', 'analyte')]), format='markdown')
+# How many records per station group are missing?
+tapply(df$result, df$stationgroup, 
+    FUN=function(col) sum(is.na(col)))
+# What are percentages of missing records?
+tapply(df$result, df$stationgroup, 
+    FUN=function(col) round(sum(is.na(col))/length(col), 4))
+# How much is a total result for a group?
+kable(aggregate(result~stationgroup, data=df, 
+    FUN=function(x) sum(as.numeric(x), rm.na=T)))
+```
+Here the `EH` group has the most missing values, and `TJ` group had 
+been recording the greatest pollution. 
+
+### Maps of Stations
+Please note that Google has restrictions on how many times you may request
+a map. If you need to run your markdown a few times I recommend to obtain
+your map and save it as a R object. Afterwards you can restore it and 
+use as needed.
+
+```{r map, fig.width=9, fig.height=9, cache=TRUE, message=F}
+library(ggplot2)
+library(ggmap)
+## Request a map from Google
+# san_diego_county <- get_googlemap(center = c(-117.35, 32.96),# midpoints
+#                                maptype = "terrain",
+#                                zoom = 9,
+#                                size = c(640, 640),
+#                                color = "color")
+## Save an object to a file
+# saveRDS(san_diego_county, file = "san_diego_county.rds")
+## Restore the object
+san_diego_county <- readRDS(file = "san_diego_county.rds")
+
+ggmap(san_diego_county) +
+           geom_point(data = df,
+           aes(x = targetlongitude,
+           y = targetlatitude,
+          color = stationgroup),
+                  shape =17,
+               size = 2)
+```
+
+Or we can look at what happens near Mission Bay.
+```{r SanDiegoMap, fig.width=9, fig.height=9, cache=TRUE, message=F}
+library(ggmap)
+# san_diego_map <- get_googlemap(center = c(-117.2, 32.75),# "Mission Bay"
+#                                maptype = "terrain",
+#                                zoom = 12,
+#                                size = c(640, 640),
+#                                color = "color")
+## Save an object to a file
+# saveRDS(san_diego_map, file = "san_diego_map.rds")
+## Restore the object
+san_diego_map <- readRDS(file = "san_diego_map.rds")
+ggmap(san_diego_map) +
+           geom_point(data = df,
+           aes(x = targetlongitude,
+           y = targetlatitude,
+          color = stationgroup),
+                  shape =17,
+               size = 2)
+```
+
+Citation: D. Kahle and H. Wickham. ggmap: Spatial Visualization with
+  ggplot2. The R Journal, 5(1), 144-161. URL
+  http://journal.r-project.org/archive/2013-1/kahle-wickham.pdf
+
+
+### Creating Columns with Dates and Time. 
+I will "paste" our date column and time column together. 
+```{r time&data, message=F}
+library(lubridate)
+df$date_time <- parse_date_time(paste(df$sampledate, df$collectiontime),
+    orders = "ymd HMS")
+df$sampledate = ymd(df$sampledate)
+df$collectiontime <- hms(df$collectiontime)
+```
+
+### Looking at average pollution by year for a station
+I will show pollution values as sizes of station marks on a map. 
+We have different kinds
+of pollution and different ways to measure them in different units, which 
+may not translate into each other. You can see more detail about units here:
+http://www.cascadeanalytical.com/resources-downloads/faqs
+
+At first I create a table with average values for every station for 
+each year.
+```{r YearlyValueMap, message=F, fig.width=10, fig.height=8}
+library(dplyr)
+yearlyResult <-  df %>% select(date_time, result, stationgroup,
+     unit, analyte, targetlatitude, targetlongitude) %>%
+    group_by(year=floor_date(date_time, "year"), stationgroup,
+        unit, analyte, targetlatitude, targetlongitude) %>%
+   summarize(yearlyMean = mean(result, na.rm = T)) 
+dim(yearlyResult)
+options(width=100)
+head(yearlyResult)
+```
+Let us see what kind of 'result' values we got. First histogram shows
+a few huge values and a lot of smaller numbers, so applying 
+logarithm function might help. Before taking a logarithm I added 1 
+to take care of zero values.
+```{r check_yearlyResults}
+sum(is.na(yearlyResult$yearlyMean))
+hist(yearlyResult$yearlyMean, col="lightblue",
+    main = " Histogram of Yearly Mean Values")
+hist(log10(yearlyResult$yearlyMean+1), col="lightblue",
+    main = " Histogram of Log(Yearly Mean Values+1)")
+```
+
+Applying logarithm function definetly helps. Here I prefer decimal
+logarithm because it's more informative: an integer part of the value
+shows a number of digits before a period in its original value.
+```{r pollutionValueMap, fig.width=9, fig.height=9, cache=TRUE, warning=F}
+library(ggplot2)
+library(ggmap)
+stationMeans <- yearlyResult %>% filter(targetlatitude > 32.65, 
+    targetlatitude < 32.85) %>%
+    group_by(stationgroup, unit, analyte, 
+        targetlatitude, targetlongitude) %>%
+    summarize(logMeanPollution = mean(log10(yearlyMean+1), na.rm = T))
+ggmap(san_diego_map) +
+      geom_point(data =
+              stationMeans[stationMeans$unit=="cfu/100mL" &
+                      stationMeans$analyte=="Enterococcus", ],
+           aes(x = targetlongitude,
+           y = targetlatitude,
+          color = stationgroup,
+               size = logMeanPollution), shape = 20) +
+    ggtitle('Average Station Pollution Values for Enterococcus,
+        Measured as cfu/100mL')
+```
+
+Because our data is restricted to specific type of units and analyte we do not 
+get all stations as before.
+```{r another_unit, fig.width=9, fig.height=9, cache=TRUE, warning=F}
+library(ggplot2)
+library(ggmap)
+ggmap(san_diego_map) +
+      geom_point(data =
+              stationMeans[stationMeans$unit=="MPN/100 mL" &
+                      stationMeans$analyte=="Coliform, Total", ],
+           aes(x = targetlongitude,
+           y = targetlatitude,
+          color = stationgroup,
+               size = logMeanPollution), shape =20)+
+    ggtitle('Average Station Pollution Values for "Coliform, Total", 
+        Measured as MPN/100 mL')
+```
