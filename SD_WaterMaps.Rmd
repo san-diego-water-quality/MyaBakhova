@@ -104,14 +104,14 @@ ggmap(san_diego_county) +
 Or we can look at what happens near Mission Bay.
 ```{r SanDiegoMap, fig.width=9, fig.height=9, cache=TRUE, message=F}
 library(ggmap)
-# san_diego_map <- get_googlemap(center = c(-117.2, 32.75),# "Mission Bay"
+# san_diego_map <- get_googlemap(center = c(-117.22, 32.75),# "Mission Bay"
 #                                maptype = "terrain",
 #                                zoom = 12,
 #                                size = c(640, 640),
 #                                color = "color")
-## Save an object to a file
+# # Save an object to a file
 # saveRDS(san_diego_map, file = "san_diego_map.rds")
-## Restore the object
+# Restore the object
 san_diego_map <- readRDS(file = "san_diego_map.rds")
 ggmap(san_diego_map) +
            geom_point(data = df,
@@ -122,7 +122,11 @@ ggmap(san_diego_map) +
                size = 2)
 ```
 
-Citation: D. Kahle and H. Wickham. ggmap: Spatial Visualization with
+
+
+See citation: D. Kahle and H. Wickham. 
+
+ggmap: Spatial Visualization with
   ggplot2. The R Journal, 5(1), 144-161. URL
   http://journal.r-project.org/archive/2013-1/kahle-wickham.pdf
 
@@ -144,15 +148,26 @@ of pollution and different ways to measure them in different units, which
 may not translate into each other. You can see more detail about units here:
 http://www.cascadeanalytical.com/resources-downloads/faqs
 
-At first I create a table with average values for every station for 
+At first we are to average our data by day because there are different
+number of measurments taken by a station. 
+```{r daily_df}
+library(dplyr)
+daily_df <-  df %>% select(stationcode, date_time, analyte, unit,result,
+    stationgroup, sampledate, targetlatitude, targetlongitude) %>%
+    group_by(date_time=floor_date(date_time, "day"), stationcode, stationgroup,
+        analyte, unit, sampledate, targetlatitude, targetlongitude) %>%
+   summarize(daily_mean = mean(result, na.rm=T))
+head(daily_df)
+```
+
+Now I create a table with average values for every station for 
 each year.
 ```{r YearlyValueMap, message=F, fig.width=10, fig.height=8}
-library(dplyr)
-yearlyResult <-  df %>% select(date_time, result, stationgroup,
+yearlyResult <-  daily_df %>% select(date_time, daily_mean, stationgroup,
      unit, analyte, targetlatitude, targetlongitude) %>%
     group_by(year=floor_date(date_time, "year"), stationgroup,
         unit, analyte, targetlatitude, targetlongitude) %>%
-   summarize(yearlyMean = mean(result, na.rm = T)) 
+   summarize(yearlyMean = mean(daily_mean, na.rm = T)) 
 dim(yearlyResult)
 options(width=100)
 head(yearlyResult)
@@ -172,6 +187,9 @@ hist(log10(yearlyResult$yearlyMean+1), col="lightblue",
 Applying logarithm function definetly helps. Here I prefer decimal
 logarithm because it's more informative: an integer part of the value
 shows a number of digits before a period in its original value.
+
+As we've seen in previous tables we have the most data for analyte=="Enterococcus" 
+measured with units "MPN/100 mL".
 ```{r pollutionValueMap, fig.width=9, fig.height=9, cache=TRUE, warning=F}
 library(ggplot2)
 library(ggmap)
@@ -182,29 +200,74 @@ stationMeans <- yearlyResult %>% filter(targetlatitude > 32.65,
     summarize(logMeanPollution = mean(log10(yearlyMean+1), na.rm = T))
 ggmap(san_diego_map) +
       geom_point(data =
-              stationMeans[stationMeans$unit=="cfu/100mL" &
+              stationMeans[stationMeans$unit=="MPN/100 mL" &
                       stationMeans$analyte=="Enterococcus", ],
            aes(x = targetlongitude,
            y = targetlatitude,
           color = stationgroup,
                size = logMeanPollution), shape = 20) +
-    ggtitle('Average Station Pollution Values for Enterococcus,
-        Measured as cfu/100mL')
+    ggtitle('Average Station Bacteria Counts for Enterococcus,
+        Measured in MPN/100 mL')
 ```
 
 Because our data is restricted to specific type of units and analyte we do not 
 get all stations as before.
+
+Note that we have range from 1 to 3 for values of `logMeanPollution`. It means that 
+original values can differ by a multiple up to $10^3 =  1000$.
+
+Second most numerous data is for "Coliform, Total" measured in cfu/100mL.
 ```{r another_unit, fig.width=9, fig.height=9, cache=TRUE, warning=F}
 library(ggplot2)
 library(ggmap)
 ggmap(san_diego_map) +
       geom_point(data =
-              stationMeans[stationMeans$unit=="MPN/100 mL" &
+              stationMeans[stationMeans$unit=="cfu/100mL" &
                       stationMeans$analyte=="Coliform, Total", ],
            aes(x = targetlongitude,
            y = targetlatitude,
           color = stationgroup,
                size = logMeanPollution), shape =20)+
-    ggtitle('Average Station Pollution Values for "Coliform, Total", 
-        Measured as MPN/100 mL')
+    ggtitle('Average Station  Bacteria Counts for "Coliform, Total", 
+        Measured in cfu/100mL')
+```
+
+For La Jolla area:
+```{r La_Jolla, fig.width=9, fig.height=9, cache=TRUE, message=F}
+library(ggmap)
+print("Here will be La Jolla area map when GoogleMaps will allow me to get one")
+# la_jolla_area <- get_googlemap(center = c(-117.25, 32.90),# "La Jolla area"
+#                                maptype = "terrain",
+#                                zoom = 12,
+#                                size = c(640, 640),
+#                                color = "color")
+# # Save an object to a file
+# saveRDS(la_jolla_area, file = "la_jolla_area.rds")
+# # Restore the object
+# la_jolla_area <- readRDS(file = "la_jolla_area.rds")
+# stationMeans <- yearlyResult %>% filter(targetlatitude > 32.80,
+#     targetlatitude < 33.05) %>%
+#     group_by(stationgroup, unit, analyte,
+#         targetlatitude, targetlongitude) %>%
+#     summarize(logMeanPollution = mean(log10(yearlyMean+1), na.rm = T))
+# ggmap(san_diego_map) +
+#       geom_point(data =
+#               stationMeans[stationMeans$unit=="cfu/100mL" &
+#                       stationMeans$analyte=="Enterococcus", ],
+#            aes(x = targetlongitude,
+#            y = targetlatitude,
+#           color = stationgroup,
+#                size = logMeanPollution), shape = 20) +
+#     ggtitle('Average Station Pollution Values for Enterococcus,
+#         Measured as cfu/100mL')
+# ggmap(la_jolla_area) +
+#       geom_point(data =
+#               stationMeans[stationMeans$unit=="cfu/100mL" &
+#                       stationMeans$analyte=="Enterococcus", ],
+#            aes(x = targetlongitude,
+#            y = targetlatitude,
+#           color = stationgroup,
+#                size = logMeanPollution), shape = 20) +
+#     ggtitle('Average Station Bacteria Counts for Enterococcus,
+#         Measured as cfu/100mL')
 ```
